@@ -1,5 +1,7 @@
 from scrapy.item import Field, Item, ItemMeta
 
+from sqlalchemy.sql import and_
+
 
 class SqlAlchemyItemMeta(ItemMeta):
 
@@ -32,6 +34,7 @@ class SqlItem(Item):
 
     def __init__(self, *args, **kwargs):
         super(SqlItem, self).__init__(*args, **kwargs)
+        self._matching_dbrow = NotImplemented
 
     def commit_item(self, engine=None):
         """ Save to Database using given engine """
@@ -61,6 +64,35 @@ class SqlItem(Item):
         That are currently not defined """
         self._null_required_fields = {key for key in self.required_keys if self.get(key) is None}
         return self._null_required_fields
+
+    def get_matching_dbrow(self, bind=None, use_cache=True):
+        """ Query the database for the row that corresponds to
+        the data currently in the item
+        params: bind
+        is a sqlalchemy connection string or sqlalchemy engine object
+        The sqlitem.table.metadata will be bound/rebound with bind
+        params: use_cache
+        Whether to pull the matching dbrow from a simple cache or not """
+
+        if bind:
+            self.table.metadata.bind = bind
+
+        if self.table.metadata.bind is None:
+            raise AttributeError(""" Need to bind the table to an engine before can query the database
+            Hint: item.metadata.bind = self.engine """)
+
+        if self.null_primary_key_fields:
+            raise ValueError("""To query the db for the matching db row the item fields
+            corresponding to the primary keys must not be null. The following item fields are null:
+            %s""" % self.null_required_fields)
+
+        if use_cache and self._matching_dbrow != NotImplemented:
+            return self._matching_dbrow
+
+        self._matching_dbrow = self.table.select().where(
+                reduce(and_, [self.table.c.get(pk) == self.get(pk) for pk in self.primary_keys])).execute().fetchone()
+
+        return self._matching_dbrow
 
     def __getattr__(self, name):
         if name in self.fields:

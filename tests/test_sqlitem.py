@@ -88,3 +88,30 @@ class SqlAlchemyItemDBTestCase(BaseTestCase):
         u.commit_item(engine=engine)
         self.assertSortedEqual([3, 'bob', 'bob the bat'],
                 engine.execute("Select * from user2 where user2.id = 3").fetchone())
+
+    def test_matching_dbrow_raises_nometadata(self):
+        u = UserItem()
+        u.table.metadata.bind = None
+        with self.assertRaises(AttributeError):
+            u.get_matching_dbrow()
+
+    def test_matching_dbrow_raises_null_primary_key(self):
+        u = UserItem()
+        u.table.metadata.bind = 'sqlite:///'
+        with self.assertRaises(ValueError):
+            u.get_matching_dbrow()
+
+    def test_matching_dbrow_pulls_matching_data(self):
+        u = UserItem()
+        u.table.metadata.bind = engine
+        u['id'] = 2
+        self.assertEqual((2, 'joe', None), u.get_matching_dbrow())
+
+    def test_matching_dbrow_uses_cache(self):
+        u = UserItem()
+        u.table.metadata.bind = engine
+        u['id'] = 2
+        u.get_matching_dbrow()
+
+        engine.execute("delete from user2")
+        self.assertEqual((2, 'joe', None), u.get_matching_dbrow())

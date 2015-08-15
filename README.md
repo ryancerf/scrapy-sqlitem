@@ -12,7 +12,6 @@ Inspiration from [scrapy-redis](https://github.com/darkrho/scrapy-redis) and [sc
 
 Quickstart
 =========
-###Install with pip
 ```
 pip install scrapy_sqlitem
 ```
@@ -46,7 +45,7 @@ class MyItem(SqlItem):
 If tables have not been created yet make sure to create them.
 See sqlalchemy docs and the example spider.
 
-###Use SqlSpider to automatically save database
+###Use SqlSpider to easily save scraped items to the  database
 
 settings.py
 ```python
@@ -90,7 +89,7 @@ Select * from mytable;
 Other Information
 =========
 
-###Do Not want to use SqlSpider?  Write a pipeline instead.
+###Do not want to use SqlSpider?  Write a pipeline instead.
 
 ```python
 
@@ -137,6 +136,31 @@ If an error occurs while saving a chunk to the db it will try and save
 each item one at a time
 
 
+###Access the underlying sqlalchemy table to query the database
+```sql
+ INSERT INTO mytable (id, name) VALUES ('1','ryan')
+```
+
+```python
+myitem = MyItem()
+# bind the table to an engine (I could have done this when I created the table too)
+myitem.table.metadata.bind = self.engine
+myitem.table.select().where(item.table.c.id == 1).execute().fetchone() 
+
+(1, 'ryan')
+```
+
+What row in the database matches the data in my item?
+
+```python
+myitem = MyItem()
+myitem['id'] = 1
+myitem.get_matching_dbrow(bind=self.engine)
+
+(1, 'ryan')
+```
+This is same query as the one above!
+
 Gotchas
 ========
 
@@ -161,6 +185,10 @@ and does not call super the item_scraped method of SqlSpider will never get call
 Other Methods of sqlitem
 ========
 
+###sqlitem.table
+
+* returns the sqlalchemy core table that corresponds to that item.
+
 ###sqlitem.null_required_fields
 
 * returns a set of the database key names that are are marked not nullable
@@ -174,6 +202,10 @@ where the corresponding data in the item is null.
 ###sqlitem.primary_keys
 
 ###sqlitem.required_keys
+
+###sqlitem.get_matching_dbrow(bind=None, use_cache=True)
+
+* Find the data in the database that matches the primary key data in the item
 
 
 ToDo

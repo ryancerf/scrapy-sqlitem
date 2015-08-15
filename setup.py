@@ -9,7 +9,7 @@ except (IOError, ImportError):
 
 setup(
     name='scrapy-sqlitem',
-    version='0.1.1',
+    version='0.1.2',
     url='https://github.com/ryancerf/scrapy-sqlitem',
     description='Scrapy extension to save items to a sql database',
     long_description=description,
