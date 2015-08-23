@@ -1,3 +1,5 @@
+import time
+
 from collections import defaultdict
 from scrapy import Spider, signals
 
@@ -11,9 +13,15 @@ class SqlMixin(object):
     def setup_sql(self):
         self.crawler.signals.connect(self.spider_closed, signal=signals.spider_closed)
         self.crawler.signals.connect(self.item_scraped, signal=signals.item_scraped)
+        self.crawler.signals.connect(self.spider_idle, signal=signals.spider_idle)
 
         self._pending_db = defaultdict(list)
         self.engine = create_engine(self.settings.get('DATABASE_URI'))
+
+        self._save_frequency = self.settings.get('SAVE_FREQUENCY_SECONDS', None)
+        if self._save_frequency:
+            now = time.time()
+            self._next_save = defaultdict(lambda: now + self._save_frequency)
 
     def _insert(self, insert_stmt):
         with self.engine.begin() as conn:
@@ -27,15 +35,32 @@ class SqlMixin(object):
             ins_stmt = self._get_insert_stmt(table, to_insert)
             self._insert(ins_stmt)
         except SQLAlchemyError as e:
-            self.log("Bulk insert of %s rows failed for table: %s will retry individually" % (str(len(to_insert)), table.name))
+            self.logger.warning("Bulk insert of %s rows failed for table: %s will retry individually, error: %s " % (str(len(to_insert)), table.name, str(e)))
             for row in to_insert:
                 try:
                     ins_stmt = self._get_insert_stmt(table, row)
                     self._insert(ins_stmt)
                 except SQLAlchemyError as e:
-                    self.log("Individual insert failed for table: %s  error: %s" % (table.name, str(e)))
+                    self.logger.error("Individual insert failed for table: %s  error: %s" % (table.name, str(e)))
         finally:
-            self._pending_db[table] = []
+            self._pending_db.pop(table, None)
+            if self._save_frequency:
+                self._next_save[table] = time.time() + self._save_frequency
+
+    def spider_idle(self):
+        """ Set SAVE_FREQUENCY_SECONDS and
+        spider will save unsaved items to the database after that many seconds
+        regardless how recently items were saved
+        useful with redis spider (because redis spider does not close)"""
+        if self._save_frequency:
+            for table in self._pending_db.keys():
+                if time.time() > self._next_save[table]:
+                    self._save_pending(table)
+
+        try:
+            super(SqlMixin, self).spider_idle()
+        except AttributeError:
+            pass
 
     def item_scraped(self, item, response, spider):
         """ by default will save every item """
@@ -55,8 +80,12 @@ class SqlMixin(object):
             to_insert.append(item._get_modelargs())
 
             if len(to_insert) >= chunksize:
-                self._bulk_insert(item.table, to_insert)
-                self._pending_db.items()
+                self._save_pending(item.table)
+
+    def _save_pending(self, table):
+        to_insert = self._pending_db[table]
+        if to_insert:
+            self._bulk_insert(table, to_insert)
 
     def spider_closed(self, spider, reason):
         try:
@@ -64,9 +93,8 @@ class SqlMixin(object):
         except AttributeError:
             pass
 
-        for table, to_insert in self._pending_db.items():
-            if to_insert:
-                self._bulk_insert(table, to_insert)
+        for table in self._pending_db.keys():
+            self._save_pending(table)
 
 
 class SqlSpider(SqlMixin, Spider):
